@@ -27,6 +27,26 @@ class ConvergenceLog(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Section(Base):
+    __tablename__ = "sections"
+
+    chainage: Mapped[str] = mapped_column(String, primary_key=True)
+    x: Mapped[float] = mapped_column(Float, nullable=False, default=50.0)
+    y: Mapped[float] = mapped_column(Float, nullable=False, default=50.0)
+
+
+def section_dict(section: "Section", last: "ConvergenceLog | None") -> dict:
+    return {
+        "chainage": section.chainage,
+        "x": section.x,
+        "y": section.y,
+        "last_log_id": last.id if last else None,
+        "verdict": last.verdict if last else None,
+        "reason": last.reason if last else None,
+        "processed_at": last.processed_at.isoformat() if last and last.processed_at else None,
+    }
+
+
 def row_dict(row: ConvergenceLog) -> dict:
     return {
         "id": row.id,

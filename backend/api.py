@@ -7,7 +7,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from claimer import start as start_claimer
-from models import Base, ConvergenceLog, SessionLocal, engine, row_dict
+from models import Base, ConvergenceLog, Section, SessionLocal, engine, row_dict, section_dict
 
 SECRET = os.environ.get("JWT_SECRET", "tunnelconv-dev-secret")
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -23,27 +23,34 @@ def seed():
     Base.metadata.create_all(engine)
     db = SessionLocal()
     try:
-        if db.query(ConvergenceLog).count() > 0:
-            return
-        now = datetime.now(timezone.utc)
-        for chainage, delta, expect in (("K12+180", 1.2, "合格"), ("K18+040", 5.6, "超限")):
-            from rules import judge
+        if db.query(ConvergenceLog).count() == 0:
+            now = datetime.now(timezone.utc)
+            for chainage, delta, expect in (("K12+180", 1.2, "合格"), ("K18+040", 5.6, "超限")):
+                from rules import judge
 
-            verdict, reason = judge(delta)
-            assert verdict == expect
-            db.add(
-                ConvergenceLog(
-                    chainage=chainage,
-                    delta_mm=delta,
-                    status="done",
-                    verdict=verdict,
-                    reason=reason,
-                    created_by="surveyor",
-                    created_at=now,
-                    processed_at=now,
+                verdict, reason = judge(delta)
+                assert verdict == expect
+                db.add(
+                    ConvergenceLog(
+                        chainage=chainage,
+                        delta_mm=delta,
+                        status="done",
+                        verdict=verdict,
+                        reason=reason,
+                        created_by="surveyor",
+                        created_at=now,
+                        processed_at=now,
+                    )
                 )
-            )
-        db.commit()
+            db.commit()
+        if db.query(Section).count() == 0:
+            for chainage, x, y in (
+                ("K12+180", 20.0, 30.0),
+                ("K18+040", 50.0, 55.0),
+                ("K25+300", 78.0, 32.0),
+            ):
+                db.add(Section(chainage=chainage, x=x, y=y))
+            db.commit()
     finally:
         db.close()
 
@@ -144,8 +151,55 @@ def create_log():
             created_at=datetime.now(timezone.utc),
         )
         db.add(row)
+        if db.get(Section, chainage) is None:
+            n = db.query(Section).count()
+            db.add(Section(chainage=chainage, x=10.0 + (n * 17) % 75, y=15.0 + (n * 23) % 65))
         db.commit()
         db.refresh(row)
         return jsonify(row_dict(row)), 201
+    finally:
+        db.close()
+
+
+@app.get("/api/sections")
+@require_login
+def list_sections():
+    """色块墙数据源：每个断面取已办结中编号最大的一笔结论；从未办结为 null。"""
+    db = SessionLocal()
+    try:
+        sections = db.query(Section).order_by(Section.chainage).all()
+        latest: dict[str, ConvergenceLog] = {}
+        done_rows = (
+            db.query(ConvergenceLog)
+            .filter(ConvergenceLog.status == "done")
+            .order_by(ConvergenceLog.id.desc())
+            .all()
+        )
+        for r in done_rows:
+            if r.chainage not in latest:
+                latest[r.chainage] = r
+        return jsonify([section_dict(s, latest.get(s.chainage)) for s in sections])
+    finally:
+        db.close()
+
+
+@app.patch("/api/sections/<path:chainage>")
+@require_writer
+def move_section(chainage):
+    body = request.get_json(silent=True) or {}
+    try:
+        x = float(body.get("x"))
+        y = float(body.get("y"))
+    except (TypeError, ValueError):
+        return jsonify({"detail": "坐标必须是数字"}), 400
+    db = SessionLocal()
+    try:
+        section = db.get(Section, chainage)
+        if section is None:
+            return jsonify({"detail": "断面不存在"}), 404
+        section.x = min(100.0, max(0.0, x))
+        section.y = min(100.0, max(0.0, y))
+        db.commit()
+        return jsonify({"chainage": section.chainage, "x": section.x, "y": section.y})
     finally:
         db.close()
