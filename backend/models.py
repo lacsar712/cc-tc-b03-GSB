@@ -27,6 +27,26 @@ class ConvergenceLog(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Section(Base):
+    """平面图上的一个断面，按桩号唯一，x/y 是色块墙坐标。"""
+
+    __tablename__ = "sections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chainage: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    x: Mapped[float] = mapped_column(Float, nullable=False, default=60)
+    y: Mapped[float] = mapped_column(Float, nullable=False, default=60)
+
+
+def section_dict(row: Section) -> dict:
+    return {
+        "id": row.id,
+        "chainage": row.chainage,
+        "x": row.x,
+        "y": row.y,
+    }
+
+
 def row_dict(row: ConvergenceLog) -> dict:
     return {
         "id": row.id,
